@@ -71,6 +71,7 @@ struct user_data {
 	int log;
 	char unamer[MAX_UNAME_LENGTH];
 	char datestamp[13];
+	cpu_set_t cpumask;
 	FILE *logfile;
 } ud = {
 	.duration = 30,
@@ -879,6 +880,11 @@ void *timekeeping_thread(void *t)
 	struct timespec myts;
 	long i = (long)t;
 
+	/*
+	 * Set affinity back to normal in case it was set on our parent
+	 * process.
+	 */
+	sched_setaffinity(0, sizeof(ud.cpumask), &ud.cpumask);
 	th = &threadlist[i];
 	tk = &th->tkthread;
 	s = &th->tkthread.sem;
@@ -976,9 +982,9 @@ void *emulation_thread(void *t)
 void calibrate_loop(void)
 {
 	unsigned long long start_time, loops_per_msec, run_time = 0;
-	cpu_set_t cpumask, old_cpumask;
 	struct timespec myts;
 	unsigned long loops;
+	cpu_set_t cpumask;
 
 	CPU_ZERO(&cpumask);
 	CPU_SET(0, &cpumask);
@@ -987,7 +993,6 @@ void calibrate_loop(void)
 	 * Perform loop calibration on one CPU only as switching CPUs may
 	 * make the value fluctuate too much to get a stable reading
 	 */
-	sched_getaffinity(0, sizeof(old_cpumask), &cpumask);
 	if (sched_setaffinity(0, sizeof(cpumask), &cpumask) == -1) {
 		if (errno != EPERM)
 			terminal_error("sched_setaffinity");
@@ -1017,7 +1022,7 @@ redo:
 		goto redo;
 
 	ud.loops_per_ms = loops_per_msec;
-	sched_setaffinity(0, sizeof(old_cpumask), &old_cpumask);
+	sched_setaffinity(0, sizeof(ud.cpumask), &ud.cpumask);
 }
 
 void log_output(const char *format, ...) __attribute__ ((format(printf, 1, 2)));
@@ -1505,6 +1510,7 @@ int main(int argc, char **argv)
 #endif
 
 	ud.cpu_load = sysconf(_SC_NPROCESSORS_ONLN);
+	sched_getaffinity(0, sizeof(ud.cpumask), &ud.cpumask);
 
 	while ((q = getopt(argc, argv, "hl:L:B:N:ut:bcnrC:I:m:w:x:W:X:")) != -1) {
 		switch (q) {
