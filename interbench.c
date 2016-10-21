@@ -1494,7 +1494,7 @@ void set_bit_on(unsigned int *mask, int index)
 int main(int argc, char **argv)
 {
 	unsigned long custom_cpu = 0;
-	int q, i, j, affinity, benchmark = 0;
+	int q, i, j, affinity = 0, benchmark = 0;
 	unsigned int selected_loads = 0;
 	unsigned int excluded_loads = 0;
 	unsigned int selected_benches = 0;
