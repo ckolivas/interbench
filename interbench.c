@@ -119,7 +119,7 @@ struct thread threadlist[THREADS] = {
 	{.label = "Ring", .name = emulate_ring, .load = 0, .rtload = 0},	/* No useful data from this */
 	{.label = "Compile", .name = emulate_compile, .load = 1, .rtload = 1},
 	{.label = "Memload", .name = emulate_memload, .load = 1, .rtload = 1},
-	{.label = "Hack", .name = emulate_hackbench, .load = 0, .rtload = 0},	/* This is causing signal headaches */
+	{.label = "Hack", .name = emulate_hackbench, .load = 1, .rtload = 1},	/* This is causing signal headaches */
 	{.label = "Custom", .name = emulate_custom},	/* Leave custom as last entry */
 };
 
@@ -843,7 +843,7 @@ void emulate_hackbench(struct thread *th)
 	sem_t *s = &th->sem.stop;
 
 	init_all_sems(&hackthread.sem);
-	create_pthread(&hackthread.pthread, NULL, hackbench_thread, (void *) 0);
+	create_pthread(&hackthread.pthread, NULL, hackbench_thread, &ud.cpu_load);
 
 	wait_sem(s);
 

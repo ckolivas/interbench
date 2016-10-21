@@ -94,11 +94,10 @@ static void receiver(unsigned int num_packets,
 }
 
 /* One group of senders and receivers */
-static unsigned int group(int ready_out,
-			  int wakefd)
+static unsigned int group(int receivers, int ready_out, int wakefd)
 {
 	unsigned int i;
-	int out_fds[NUM_FDS];
+	int *out_fds = calloc(sizeof(int *), receivers + 1);
 
 	for (i = 0; i < NUM_FDS; i++) {
 		int fds[2];
@@ -133,25 +132,26 @@ static unsigned int group(int ready_out,
 	for (i = 0; i < NUM_FDS; i++)
 		close(out_fds[i]);
 
+	free(out_fds);
 	/* Return number of children to reap */
 	return NUM_FDS * 2;
 }
 
-void *hackbench_thread(void __maybe_unused *t)
+void *hackbench_thread(void *t)
 {
-	unsigned int i, num_groups, total_children;
+	unsigned int i, *num_groups, total_children;
 	int readyfds[2], wakefds[2];
 	char dummy;
 
-	num_groups = 50;
+	num_groups = t;
 
 	fdpair(readyfds);
 	fdpair(wakefds);
 	
 	while (1) {
 		total_children = 0;
-		for (i = 0; i < num_groups; i++)
-			total_children += group(readyfds[1], wakefds[0]);
+		for (i = 0; i < *num_groups; i++)
+			total_children += group(*num_groups, readyfds[1], wakefds[0]);
 	
 		/* Wait for everyone to be ready */
 		for (i = 0; i < total_children; i++)
