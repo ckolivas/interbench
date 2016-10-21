@@ -116,10 +116,10 @@ struct thread threadlist[THREADS] = {
 	{.label = "Burn", .name = emulate_burn, .load = 1, .rtload = 1},
 	{.label = "Write", .name = emulate_write, .load = 1, .rtload = 1},
 	{.label = "Read", .name = emulate_read, .load = 1, .rtload = 1},
-	{.label = "Ring", .name = emulate_ring, .load = 0, .rtload = 0},	/* No useful data from this */
+	{.label = "Ring", .name = emulate_ring, .load = 1, .rtload = 1},
 	{.label = "Compile", .name = emulate_compile, .load = 1, .rtload = 1},
 	{.label = "Memload", .name = emulate_memload, .load = 1, .rtload = 1},
-	{.label = "Hack", .name = emulate_hackbench, .load = 1, .rtload = 1},	/* This is causing signal headaches */
+	{.label = "Hack", .name = emulate_hackbench, .load = 1, .rtload = 1},
 	{.label = "Custom", .name = emulate_custom},	/* Leave custom as last entry */
 };
 
@@ -706,15 +706,16 @@ void emulate_read(struct thread *th)
 	}
 }
 
-#define RINGTHREADS	4
+#define RINGTHREADS	(ud.cpu_load)
 
-struct thread ringthreads[RINGTHREADS];
+struct thread *ringthreads;
 
 void *ring_thread(void *t)
 {
+	unsigned int post_to;
 	struct thread *th;
 	struct sems *s;
-	int i, post_to;
+	int i;
 
 	i = (long)t;
 	th = &ringthreads[i];
@@ -741,8 +742,9 @@ out:
 void emulate_ring(struct thread *th)
 {
 	sem_t *s = &th->sem.stop;
-	int i;
+	unsigned int i;
 
+	ringthreads = calloc(sizeof(struct thread), RINGTHREADS + 1);
 	for (i = 0 ; i < RINGTHREADS ; i++) {
 		init_all_sems(&ringthreads[i].sem);
 		create_pthread(&ringthreads[i].pthread, NULL, 
@@ -758,6 +760,7 @@ void emulate_ring(struct thread *th)
 		wait_sem(&ringthreads[i].sem.complete);
 		join_pthread(ringthreads[i].pthread, NULL);
 	}
+	free(ringthreads);
 }
 
 /* We emulate a compile by running burn, write and read threads simultaneously */
