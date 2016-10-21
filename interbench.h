@@ -4,12 +4,14 @@
 
 extern void *hackbench_thread(void *t);
 extern void terminal_error(const char *name);
-extern inline void post_sem(sem_t *s);
-extern inline void wait_sem(sem_t *s);
-extern inline int trywait_sem(sem_t *s);
-extern inline ssize_t Read(int fd, void *buf, size_t count);
+extern void post_sem(sem_t *s);
+extern void wait_sem(sem_t *s);
+extern int trywait_sem(sem_t *s);
+extern ssize_t Read(int fd, void *buf, size_t count);
 
 #define THREADS		13	/* The total number of different loads */
+
+#define __maybe_unused          __attribute__((unused))
 
 struct sems {
 	sem_t ready;

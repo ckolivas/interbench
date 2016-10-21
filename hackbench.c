@@ -137,14 +137,13 @@ static unsigned int group(int ready_out,
 	return NUM_FDS * 2;
 }
 
-void *hackbench_thread(void *t)
+void *hackbench_thread(void __maybe_unused *t)
 {
 	unsigned int i, num_groups, total_children;
 	int readyfds[2], wakefds[2];
 	char dummy;
 
 	num_groups = 50;
-	t = 0;
 
 	fdpair(readyfds);
 	fdpair(wakefds);

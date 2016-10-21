@@ -45,6 +45,7 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include "interbench.h"
 
 #define MAX_UNAME_LENGTH	100
@@ -58,6 +59,7 @@
 struct user_data {
 	unsigned long loops_per_ms;
 	unsigned long ram, swap;
+	unsigned long filesize;
 	int duration;
 	int do_rt;
 	int bench_nice;
@@ -72,7 +74,6 @@ struct user_data {
 	FILE *logfile;
 } ud = {
 	.duration = 30,
-	.cpu_load = 4,
 	.log = 1,
 };
 
@@ -307,7 +308,7 @@ out:
  * Yes, sem_post and sem_wait shouldn't return -1 but they do so we must
  * handle it.
  */
-inline void post_sem(sem_t *s)
+void post_sem(sem_t *s)
 {
 retry:
 	if ((sem_post(s)) == -1) {
@@ -317,7 +318,7 @@ retry:
 	}
 }
 
-inline void wait_sem(sem_t *s)
+void wait_sem(sem_t *s)
 {
 retry:
 	if ((sem_wait(s)) == -1) {
@@ -327,7 +328,7 @@ retry:
 	}
 }
 
-inline int trywait_sem(sem_t *s)
+int trywait_sem(sem_t *s)
 {
 	int ret;
 
@@ -341,7 +342,7 @@ retry:
 	return ret;
 }
 
-inline ssize_t Read(int fd, void *buf, size_t count)
+ssize_t Read(int fd, void *buf, size_t count)
 {
 	ssize_t retval;
 
@@ -355,7 +356,7 @@ retry:
 	return retval;
 }
 
-inline ssize_t Write(int fd, const void *buf, size_t count)
+ssize_t Write(int fd, const void *buf, size_t count)
 {
 	ssize_t retval;
 
@@ -639,7 +640,7 @@ void emulate_write(struct thread *th)
 		terminal_fileopen_error(fp, "stat");
 	if (statbuf.st_blksize < MIN_BLK_SIZE)
 		statbuf.st_blksize = MIN_BLK_SIZE;
-	mem = ud.ram / (statbuf.st_blksize / 1024);	/* kilobytes to blocks */
+	mem = ud.filesize / (statbuf.st_blksize / 1024);	/* kilobytes to blocks */
 	if (!(buf = calloc(1, statbuf.st_blksize)))
 		terminal_fileopen_error(fp, "calloc");
 	if (fclose(fp) == -1)
@@ -975,9 +976,23 @@ void *emulation_thread(void *t)
 void calibrate_loop(void)
 {
 	unsigned long long start_time, loops_per_msec, run_time = 0;
-	unsigned long loops;
+	cpu_set_t cpumask, old_cpumask;
 	struct timespec myts;
+	unsigned long loops;
 
+	CPU_ZERO(&cpumask);
+	CPU_SET(0, &cpumask);
+
+	/*
+	 * Perform loop calibration on one CPU only as switching CPUs may
+	 * make the value fluctuate too much to get a stable reading
+	 */
+	sched_getaffinity(0, sizeof(old_cpumask), &cpumask);
+	if (sched_setaffinity(0, sizeof(cpumask), &cpumask) == -1) {
+		if (errno != EPERM)
+			terminal_error("sched_setaffinity");
+		fprintf(stderr, "could not set cpu affinity\n");
+	}
 	loops_per_msec = 100000;
 redo:
 	/* Calibrate to within 1% accuracy */
@@ -1002,6 +1017,7 @@ redo:
 		goto redo;
 
 	ud.loops_per_ms = loops_per_msec;
+	sched_setaffinity(0, sizeof(old_cpumask), &old_cpumask);
 }
 
 void log_output(const char *format, ...) __attribute__ ((format(printf, 1, 2)));
@@ -1028,12 +1044,10 @@ void log_output(const char *format, ...)
 void show_latencies(struct thread *th)
 {
 	struct data_table *tbj;
-	struct tk_thread *tk;
 	double average_latency, deadlines_met, samples_met, sd, max_latency;
 	long double variance = 0;
 
 	tbj = th->dt;
-	tk = &th->tkthread;
 
 	if (tbj->nr_samples > 1) {
 		average_latency = tbj->total_latency / tbj->nr_samples;
@@ -1102,7 +1116,7 @@ void create_read_file(void)
 	if (statbuf.st_blksize < MIN_BLK_SIZE)
 		statbuf.st_blksize = MIN_BLK_SIZE;
 	bsize = statbuf.st_blksize;
-	if (statbuf.st_size / 1024 / bsize == ud.ram / bsize)
+	if (statbuf.st_size / 1024 / bsize == ud.filesize / bsize)
 		return;
 	if (remove(name) == -1)
 		terminal_error("remove");
@@ -1117,7 +1131,7 @@ write:
 	bsize = statbuf.st_blksize;
 	if (!(buf = calloc(1, bsize)))
 		terminal_fileopen_error(fp, "calloc");
-	mem = ud.ram / (bsize / 1024);	/* kilobytes to blocks */
+	mem = ud.filesize / (bsize / 1024);	/* kilobytes to blocks */
 
 	for (i = 0 ; i < mem; i++) {
 		if (fwrite(buf, bsize, 1, fp) != 1)
@@ -1131,16 +1145,20 @@ write:
 void get_ram(void)
 {
 	FILE *meminfo;
-        char aux[256];
+        char aux[256] = {};
  
 	if(!(meminfo = fopen("/proc/meminfo", "r")))
 		terminal_error("fopen");
 
 	ud.ram = ud.swap = 0;
-	while( !feof(meminfo) && !fscanf(meminfo, "MemTotal: %lu kB", &ud.ram) )
-            fgets(aux,sizeof(aux),meminfo);
-	while( !feof(meminfo) && !fscanf(meminfo, "SwapTotal: %lu kB", &ud.swap) )
-            fgets(aux,sizeof(aux),meminfo);
+	while( !feof(meminfo) && fgets(aux,sizeof(aux),meminfo) ) {
+		if (sscanf(aux, "MemTotal: %lu kB", &ud.ram) )
+			break;
+	}
+	while( !feof(meminfo) && fgets(aux,sizeof(aux),meminfo) ) {
+		if (sscanf(aux, "SwapTotal: %lu kB", &ud.swap) )
+			break;
+	}
 	if (fclose(meminfo) == -1)
 		terminal_error("fclose");
 
@@ -1155,6 +1173,11 @@ void get_ram(void)
 			}
 		}
 	}
+	/* Limit filesize to 1GB */
+	if (ud.ram > 1000)
+		ud.filesize = 1000000;
+	else
+		ud.filesize = ud.ram;
 }
 
 void get_logfilename(void)
@@ -1391,18 +1414,17 @@ void init_pipes(void)
 
 void usage(void)
 {
-	/* Affinity commented out till working on all architectures */
 	fprintf(stderr, "interbench v " INTERBENCH_VERSION " by Con Kolivas\n");
 	fprintf(stderr, "interbench [-l <int>] [-L <int>] [-t <int] [-B <int>] [-N <int>]\n");
 	fprintf(stderr, "\t[-b] [-c] [-r] [-C <int> -I <int>] [-m <comment>]\n");
 	fprintf(stderr, "\t[-w <load type>] [-x <load type>] [-W <bench>] [-X <bench>]\n");
 	fprintf(stderr, "\t[-h]\n\n");
 	fprintf(stderr, " -l\tUse <int> loops per sec (default: use saved benchmark)\n");
-	fprintf(stderr, " -L\tUse cpu load of <int> with burn load (default: 4)\n");
+	fprintf(stderr, " -L\tUse cpu load of <int> with burn load (default: detected processors)\n");
 	fprintf(stderr, " -t\tSeconds to run each benchmark (default: 30)\n");
 	fprintf(stderr, " -B\tNice the benchmarked thread to <int> (default: 0)\n");
 	fprintf(stderr, " -N\tNice the load thread to <int> (default: 0)\n");
-	//fprintf(stderr, " -u\tImitate uniprocessor\n");
+	fprintf(stderr, " -u\tImitate uniprocessor\n");
 	fprintf(stderr, " -b\tBenchmark loops_per_ms even if it is already known\n");
 	fprintf(stderr, " -c\tOutput to console only (default: use console and logfile)\n");
 	fprintf(stderr, " -r\tPerform real time scheduling benchmarks (default: non-rt)\n");
@@ -1415,7 +1437,7 @@ void usage(void)
 	fprintf(stderr, " -X\tExclude <bench> from the list of benchmarks to be tested\n");
 	fprintf(stderr, " -h\tShow this help\n");
 	fprintf(stderr, "\nIf run without parameters interbench will run a standard benchmark\n");
-	fprintf(stderr, "\nRecommend to run as root and set -L to number of CPUs on the system\n\n");
+	fprintf(stderr, "\nRecommend to run sudo or as root\n\n");
 }
 
 #ifdef DEBUG
@@ -1451,12 +1473,12 @@ int load_index(const char* loadname)
 	return -1;
 }
 
-inline int bit_is_on(const unsigned int mask, int index)
+int bit_is_on(const unsigned int mask, int index)
 {
 	return (mask & (1 << index)) != 0;
 }
 
-inline void set_bit_on(unsigned int *mask, int index)
+void set_bit_on(unsigned int *mask, int index)
 {
 	*mask |= (1 << index);
 }
@@ -1481,6 +1503,8 @@ int main(int argc, char **argv)
 	if (signal(SIGCHLD, deadchild) == SIG_ERR)
 		terminal_error("signal");
 #endif
+
+	ud.cpu_load = sysconf(_SC_NPROCESSORS_ONLN);
 
 	while ((q = getopt(argc, argv, "hl:L:B:N:ut:bcnrC:I:m:w:x:W:X:")) != -1) {
 		switch (q) {
@@ -1600,24 +1624,18 @@ int main(int argc, char **argv)
 		threadlist[CUSTOM].rtload = 1;
 	}
 
-	/*FIXME Affinity commented out till working on all architectures */
-#if 0
 	if (affinity) {
-#ifdef CPU_SET	/* Current glibc expects cpu_set_t */
 		cpu_set_t cpumask;
 
 		CPU_ZERO(&cpumask);
 		CPU_SET(0, &cpumask);
-#else		/* Old glibc expects unsigned long */
-		unsigned long cpumask = 1;
-#endif
+
 		if (sched_setaffinity(0, sizeof(cpumask), &cpumask) == -1) {
 			if (errno != EPERM)
 				terminal_error("sched_setaffinity");
 			fprintf(stderr, "could not set cpu affinity\n");
 		}
 	}
-#endif
 
 	/* Make benchmark a multiple of 10 seconds for proper range of X loads */
 	if (ud.duration % 10)
@@ -1633,7 +1651,8 @@ int main(int argc, char **argv)
 		if (benchmark)
 			goto bench;
 		if ((fp = fopen(fname, "r"))) {
-			fscanf(fp, "%lu", &ud.loops_per_ms);
+			if (fscanf(fp, "%lu", &ud.loops_per_ms) < 1)
+				terminal_error("fscanf");
 			if (fclose(fp) == -1)
 				terminal_error("fclose");
 			if (ud.loops_per_ms) {
@@ -1682,6 +1701,7 @@ loops_known:
 		fprintf(stderr, "Unable to write to logfile\n");
 		ud.log = 0;
 	}
+	log_output("Load set to %lu processors\n", ud.cpu_load);
 	log_output("\n");
 	log_output("Using %lu loops per ms, running every load for %d seconds\n",
 		ud.loops_per_ms, ud.duration);
