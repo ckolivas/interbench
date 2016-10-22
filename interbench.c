@@ -143,16 +143,20 @@ void terminal_fileopen_error(FILE *fp, char *name)
 	terminal_error(name);
 }
 
+#ifndef CLOCK_MONOTONIC_RAW
+#define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
+#endif
+
 unsigned long long get_nsecs(struct timespec *myts)
 {
-	if (clock_gettime(CLOCK_REALTIME, myts))
+	if (clock_gettime(CLOCK_MONOTONIC_RAW, myts))
 		terminal_error("clock_gettime");
 	return (myts->tv_sec * 1000000000 + myts->tv_nsec );
 }
 
 unsigned long get_usecs(struct timespec *myts)
 {
-	if (clock_gettime(CLOCK_REALTIME, myts))
+	if (clock_gettime(CLOCK_MONOTONIC_RAW, myts))
 		terminal_error("clock_gettime");
 	return (myts->tv_sec * 1000000 + myts->tv_nsec / 1000 );
 }
@@ -917,13 +921,9 @@ void *timekeeping_thread(void *t)
 			unsigned long diff = 0;
 			microsleep(tk->sleep_interval);
 			now = get_usecs(&myts);
-			/* now should always be > start_time but... */
-			if (now > start_time) {
-				diff = now - start_time;
-				if (diff > tk->sleep_interval)
-					tk->slept_interval = diff -
-						tk->sleep_interval;
-			}
+			diff = now - start_time;
+			if (diff > tk->sleep_interval)
+				tk->slept_interval = diff - tk->sleep_interval;
 		}
 		tk->sleep_interval = 0;
 		post_sem(&s->complete);
