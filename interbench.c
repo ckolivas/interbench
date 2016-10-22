@@ -1002,6 +1002,11 @@ void calibrate_loop(void)
 		fprintf(stderr, "could not set cpu affinity\n");
 	}
 	loops_per_msec = 100000;
+	start_time = get_usecs(&myts);
+	/* Run for at least one second for cpu frequency to hit maximum */
+	do {
+		burn_loops(loops_per_msec);
+	} while (get_usecs(&myts) - start_time < 1000000);
 redo:
 	/* Calibrate to within 1% accuracy */
 	while (run_time > 1010000 || run_time < 990000) {
