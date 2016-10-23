@@ -119,7 +119,7 @@ struct thread threadlist[THREADS] = {
 	{.label = "Ring", .name = emulate_ring, .load = 1, .rtload = 1},
 	{.label = "Compile", .name = emulate_compile, .load = 1, .rtload = 1},
 	{.label = "Memload", .name = emulate_memload, .load = 1, .rtload = 1},
-	{.label = "Hack", .name = emulate_hackbench, .load = 1, .rtload = 1},
+	{.label = "Hack", .name = emulate_hackbench, .load = 0, .rtload = 0},
 	{.label = "Custom", .name = emulate_custom},	/* Leave custom as last entry */
 };
 
