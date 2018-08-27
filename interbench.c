@@ -986,7 +986,7 @@ void calibrate_loop(void)
 {
 	unsigned long long start_time, loops_per_msec, run_time = 0;
 	struct timespec myts;
-	unsigned long loops;
+	unsigned long loops, fail_count = 0, recheck_count = 1;
 	cpu_set_t cpumask;
 
 	CPU_ZERO(&cpumask);
@@ -1022,12 +1022,18 @@ redo:
 	sleep(1);
 	loops = loops_per_msec;
 	start_time = get_nsecs(&myts);
-	burn_loops(loops);
-	run_time = get_nsecs(&myts) - start_time;
+	burn_loops(loops * recheck_count);
+	run_time = (get_nsecs(&myts) - start_time) / recheck_count;
 
 	/* Tolerate 5% difference on checking */
-	if (run_time > 1050000 || run_time < 950000)
+	if (run_time > 1050000 || run_time < 950000) {
+		/* Increase recheck time if 5% margin is missed too often */
+		if (++fail_count >= 50) {
+			recheck_count *= 2;
+			fail_count = 0;
+		}
 		goto redo;
+	}
 
 	ud.loops_per_ms = loops_per_msec;
 	sched_setaffinity(0, sizeof(ud.cpumask), &ud.cpumask);
